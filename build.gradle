@@ -1,0 +1,91 @@
+plugins {
+    id "java"
+    id "idea"
+    id "maven"
+    id "maven-publish"
+}
+
+version = '0.0.1'
+group = 'com.macgregor'
+sourceCompatibility = 1.8
+targetCompatibility = 1.8
+
+// UTF-8 should be standard by now. So use it!
+[compileJava, compileTestJava]*.options*.encoding = 'UTF-8'
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    compile(
+            "io.swagger:swagger-annotations:1.5.18",
+            "com.fasterxml.jackson.core:jackson-annotations:2.9.4",
+            "com.fasterxml.jackson.dataformat:jackson-dataformat-xml:2.9.4",
+            "org.apache.commons:commons-lang3:3.7",
+            "commons-beanutils:commons-beanutils:1.9.3",
+            "org.slf4j:slf4j-api:1.7.25"
+    )
+    testCompile(
+            'junit:junit:4.12',
+            "org.mockito:mockito-core:2.15.0",
+            "commons-io:commons-io:2.6",
+            "ch.qos.logback:logback-classic:1.2.3"
+    )
+}
+
+task testJar(type: Jar) {
+    baseName = project.name + '-test'
+    from sourceSets.test.output
+}
+
+publishing {
+    publications {
+        core(MavenPublication) {
+            from components.java
+        }
+        testutil(MavenPublication) {
+            artifactId project.name + '-test'
+            artifact testJar
+
+            //for whatever reason building the jar this way doesnt include any dependencies in the pom so we have to add them manually
+            pom.withXml {
+                def dependencies = asNode().appendNode('dependencies')
+                configurations.testCompile.getResolvedConfiguration().getFirstLevelModuleDependencies().each {
+                    def dependency = dependencies.appendNode('dependency')
+                    dependency.appendNode('groupId', it.moduleGroup)
+                    dependency.appendNode('artifactId', it.moduleName)
+                    dependency.appendNode('version', it.moduleVersion)
+                }
+            }
+
+        }
+    }
+}
+
+publishing {
+    repositories {
+        maven {
+            // change to point to your repo, e.g. http://my.org/repo
+            url "$buildDir/repo"
+        }
+    }
+}
+
+clean.doFirst {
+    delete "${rootDir}/out/"
+}
+
+// gives us better output when running tests
+tasks.withType(Test) {
+    testLogging {
+        exceptionFormat "full"
+        events "skipped", "passed", "failed"
+        showStandardStreams true
+    }
+    maxParallelForks = 2
+}
+
+
+task stage(dependsOn: ['build', 'clean', 'publish', 'publishToMavenLocal']) {}
+build.mustRunAfter clean
