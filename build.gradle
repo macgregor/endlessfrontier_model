@@ -3,12 +3,29 @@ plugins {
     id "idea"
     id "maven"
     id "maven-publish"
+    id "signing"
 }
 
 version = '0.0.1'
 group = 'com.macgregor'
 sourceCompatibility = 1.8
 targetCompatibility = 1.8
+description = "Project containing model objects used by the unofficial Endless Frontier api"
+
+project.ext {
+    url = "https://github.com/macgregor/endlessfrontier_model"
+    scmUrl = "https://github.com/macgregor/endlessfrontier_model.git"
+    scmConnection = "scm:git:git://github.com/macgregor/endlessfrontier_model.git"
+    scmDeveloperConnection = "scm:git:ssh:git@github.com:macgregor/endlessfrontier_model.git"
+    licenseName = "MIT License"
+    licenseUrl = "http://www.opensource.org/licenses/mit-license.php"
+    licenseDistribution = "repo"
+    developerId = "macgregor"
+    developerName = "Matthew Stratton"
+    developerEmail = "matthew.m.stratton@gmail.com"
+    pomFilePath = "${project.projectDir}/build/pom.xml"
+    pomFile = file(pomFilePath)
+}
 
 // UTF-8 should be standard by now. So use it!
 [compileJava, compileTestJava]*.options*.encoding = 'UTF-8'
@@ -35,40 +52,107 @@ dependencies {
 }
 
 task testJar(type: Jar) {
-    baseName = project.name + '-test'
+    classifier 'test'
     from sourceSets.test.output
 }
 
-publishing {
-    publications {
-        core(MavenPublication) {
-            from components.java
-        }
-        testutil(MavenPublication) {
-            artifactId project.name + '-test'
-            artifact testJar
+artifacts {
+    archives jar
+    archives testJar
+}
 
-            //for whatever reason building the jar this way doesnt include any dependencies in the pom so we have to add them manually
-            pom.withXml {
-                def dependencies = asNode().appendNode('dependencies')
-                configurations.testCompile.getResolvedConfiguration().getFirstLevelModuleDependencies().each {
-                    def dependency = dependencies.appendNode('dependency')
-                    dependency.appendNode('groupId', it.moduleGroup)
-                    dependency.appendNode('artifactId', it.moduleName)
-                    dependency.appendNode('version', it.moduleVersion)
+signing {
+    sign configurations.archives
+}
+
+def customizePom(pom) {
+    pom.withXml {
+        asNode().children().last() + {
+            resolveStrategy = Closure.DELEGATE_FIRST
+            name project.name
+            description project.description
+            url project.url
+            scm {
+                url project.scmUrl
+                connection project.scmConnection
+                developerConnection project.scmDeveloperConnection
+            }
+            licenses {
+                license {
+                    name project.licenseName
+                    url project.licenseUrl
+                    distribution project.licenseDistribution
                 }
             }
-
+            developers {
+                developer {
+                    id project.developerId
+                    name project.developerName
+                    email project.developerEmail
+                }
+            }
         }
     }
 }
 
+
+
 publishing {
+    publications {
+        core(MavenPublication) {
+            customizePom(pom)
+            from components.java
+
+            // create the sign pom artifact
+            pom.withXml {
+                def pomFile = file("${project.buildDir}/generated-pom.xml")
+                writeTo(pomFile)
+                def pomAscFile = signing.sign(pomFile).signatureFiles[0]
+                artifact(pomAscFile) {
+                    classifier = null
+                    extension = 'pom.asc'
+                }
+            }
+
+            artifact(testJar) {
+                classifier = 'test'
+
+            }
+
+            // create the signed artifacts
+            project.tasks.signArchives.signatureFiles.each {
+                artifact(it) {
+                    def matcher = it.file =~ /-(sources|javadoc)\.jar\.asc$/
+                    if (matcher.find()) {
+                        classifier = matcher.group(1)
+                    } else {
+                        classifier = null
+                    }
+                    extension = 'jar.asc'
+                }
+            }
+        }
+    }
     repositories {
         maven {
-            // change to point to your repo, e.g. http://my.org/repo
-            url "$buildDir/repo"
+            url "https://oss.sonatype.org/service/local/staging/deploy/maven2"
+            credentials {
+                username sonatypeUsername
+                password sonatypePassword
+            }
         }
+    }
+}
+
+model {
+    tasks.generatePomFileForMavenJavaPublication {
+        destination = file("$buildDir/generated-pom.xml")
+    }
+    tasks.publishMavenJavaPublicationToMavenLocal {
+        dependsOn project.tasks.signArchives
+    }
+    tasks.publishMavenJavaPublicationToMavenRepository {
+        dependsOn project.tasks.signArchives
     }
 }
 
