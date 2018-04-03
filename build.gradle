@@ -7,7 +7,7 @@ plugins {
 }
 
 version = '0.0.1'
-group = 'com.macgregor'
+group = 'com.github.macgregor'
 sourceCompatibility = 1.8
 targetCompatibility = 1.8
 description = "Project containing model objects used by the unofficial Endless Frontier api"
@@ -23,8 +23,6 @@ project.ext {
     developerId = "macgregor"
     developerName = "Matthew Stratton"
     developerEmail = "matthew.m.stratton@gmail.com"
-    pomFilePath = "${project.projectDir}/build/pom.xml"
-    pomFile = file(pomFilePath)
 }
 
 // UTF-8 should be standard by now. So use it!
@@ -52,20 +50,26 @@ dependencies {
 }
 
 task testJar(type: Jar) {
-    classifier 'test'
+    baseName = project.name + '-test'
     from sourceSets.test.output
 }
 
-artifacts {
-    archives jar
-    archives testJar
+task testSourceJar(type: Jar) {
+    classifier "sources"
+    from sourceSets.main.allJava + sourceSets.test.allJava
+}
+
+task sourceJar(type: Jar) {
+    classifier "sources"
+    from sourceSets.main.allJava
 }
 
 signing {
+    useGpgCmd()
     sign configurations.archives
 }
 
-def customizePom(pom) {
+def pomProjectDetails(pom) {
     pom.withXml {
         asNode().children().last() + {
             resolveStrategy = Closure.DELEGATE_FIRST
@@ -99,8 +103,8 @@ def customizePom(pom) {
 
 publishing {
     publications {
-        core(MavenPublication) {
-            customizePom(pom)
+        mavenJava(MavenPublication) {
+            pomProjectDetails(pom)
             from components.java
 
             // create the sign pom artifact
@@ -114,15 +118,14 @@ publishing {
                 }
             }
 
-            artifact(testJar) {
-                classifier = 'test'
-
+            artifact(sourceJar) {
+                classifier = 'sources'
             }
 
             // create the signed artifacts
             project.tasks.signArchives.signatureFiles.each {
                 artifact(it) {
-                    def matcher = it.file =~ /-(sources|javadoc)\.jar\.asc$/
+                    def matcher = it.file =~ /-(sources)\.jar\.asc$/
                     if (matcher.find()) {
                         classifier = matcher.group(1)
                     } else {
@@ -132,6 +135,48 @@ publishing {
                 }
             }
         }
+        testUtil(MavenPublication) {
+            pomProjectDetails(pom)
+            artifactId project.name + '-test'
+            artifact testJar
+
+            // create the sign pom artifact
+            pom.withXml {
+                def dependencies = asNode().appendNode('dependencies')
+                configurations.testCompile.getResolvedConfiguration().getFirstLevelModuleDependencies().each {
+                    def dependency = dependencies.appendNode('dependency')
+                    dependency.appendNode('groupId', it.moduleGroup)
+                    dependency.appendNode('artifactId', it.moduleName)
+                    dependency.appendNode('version', it.moduleVersion)
+                }
+
+                def pomFile = file("${project.buildDir}/generated-test-pom.xml")
+                writeTo(pomFile)
+                def pomAscFile = signing.sign(pomFile).signatureFiles[0]
+                artifact(pomAscFile) {
+                    classifier = null
+                    extension = 'pom.asc'
+                }
+            }
+
+            artifact(testSourceJar) {
+                classifier = 'sources'
+            }
+
+            // create the signed artifacts
+            project.tasks.signArchives.signatureFiles.each {
+                artifact(it) {
+                    def matcher = it.file =~ /-(sources)\.jar\.asc$/
+                    if (matcher.find()) {
+                        classifier = matcher.group(1)
+                    } else {
+                        classifier = null
+                    }
+                    extension = 'jar.asc'
+                }
+            }
+        }
+
     }
     repositories {
         maven {
@@ -152,6 +197,15 @@ model {
         dependsOn project.tasks.signArchives
     }
     tasks.publishMavenJavaPublicationToMavenRepository {
+        dependsOn project.tasks.signArchives
+    }
+    tasks.generatePomFileForTestUtilPublication {
+        destination = file("$buildDir/generated-test-pom.xml")
+    }
+    tasks.publishTestUtilPublicationToMavenLocal {
+        dependsOn project.tasks.signArchives
+    }
+    tasks.publishTestUtilPublicationToMavenRepository {
         dependsOn project.tasks.signArchives
     }
 }
