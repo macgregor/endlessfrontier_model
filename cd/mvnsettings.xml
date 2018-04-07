@@ -17,6 +17,7 @@
                 <gpg.executable>gpg</gpg.executable>
                 <gpg.keyname>${env.SIGNING_KEY_NAME}</gpg.keyname>
                 <gpg.passphrase>${env.SIGNING_KEY_PASS}</gpg.passphrase>
+                <gpg.useagent>false</gpg.useagent>
             </properties>
         </profile>
     </profiles>
